@@ -1,0 +1,324 @@
+---
+title: "CVD Incidence - AURUM OBSERVATION TABLE - DIAGNOSES"
+author: "Nathalie Conrad"
+date: "October 2023"
+output: html_document
+---
+
+## DATA EXTRACTION, 2nd delivery, DIAGNOSES
+
+# LIBRARIES AND SETTINGS
+```{r, warning=FALSE, message=FALSE}
+#install.packages("rapport")
+library(knitr)
+library(dplyr)
+library(data.table)
+library(gdata)
+library(ggplot2)
+library(rapportools)
+library(rapport)
+library(bit64)
+library(R.utils)
+library(bestNormalize)
+library(gridExtra)
+```
+
+## Work Environment
+```{r, warning=FALSE, message=FALSE}
+# Secure data directories
+PATH_D = "/Users/u0133446/CPRD-2020/Final_Delivery1_19_156" # path to data directory
+PATH_W = "/Users/u0133446/CPRD-2020/Workspace/CVD_incidence" # path to workspace directory
+PATH_L = "/Users/u0133446/CPRD-2020/Final_Delivery1_19_156/Lookups" # path to lookups directory
+
+# Dropbox directories for diagnostic codes, aggregated tables and plots
+PATH = "/Users/u0133446/Dropbox/Leuven/INF-CVD" # path to dropbox directory
+PATH_P = "/Users/u0133446/Dropbox/Leuven/INF-CVD/CPRD-2020_non_data/Plots/CVD_incidence" # path to plots directory
+```
+
+## Study Dates
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+study_start_date = as.Date("01/01/2000", format="%d/%m/%Y")
+linkage_start_date = as.Date("01/01/1998", format="%d/%m/%Y")
+study_end_date = as.Date("30/06/2019", format="%d/%m/%Y")
+# data_source	start	end
+# hes_apc	01/04/1997	30/06/2019
+# hes_acp	01/10/1997	31/03/2008
+# hes_op	01/04/2003	30/06/2019
+# ons_death	02/01/1998	01/05/2019
+```
+
+## Diagnostic codes (code review 03/03/2023)
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+## Read code tables
+all_codes_table = data.table(read.table(file.path(PATH,"/Phenotyping/Final_AD_INF_CVD/CVD_incidence/2023-03-03_FINAL_CVD_diagnostic_codes_table_JMM.txt"), header = TRUE, sep="\t", colClasses=c("medcode_aurum"="integer64"))) # Final set of codes for analysis as per JMM review 03/03/2023
+nrow(all_codes_table)
+head(all_codes_table)
+levels(as.factor(all_codes_table$include))
+
+all_codes_table = all_codes_table[include == 1]
+
+## Subset for Read codes in Aurum
+colnames(all_codes_table)
+diag_codes_table_aurum= all_codes_table[codetype == "aurum"]
+head(diag_codes_table_aurum)
+summary(diag_codes_table_aurum$medcode_aurum)
+nrow(diag_codes_table_aurum)
+
+```
+
+# Read Observation table 1
+```{r observation1, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation1"))
+#observation_aurum = fread(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation1/19_156_Aurum_Extract_Obs_1_extOBS.txt.gz"))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+head(observation_aurum)
+colnames(observation_aurum)
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum1 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum1, file.path(PATH_W,"observation_aurum1_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 2
+```{r observation2, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation2"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum2 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum2, file.path(PATH_W,"observation_aurum2_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 3
+```{r observation3, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation3"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum3 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum3, file.path(PATH_W,"observation_aurum3_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 4
+```{r observation4, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation4"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum4 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum4, file.path(PATH_W,"observation_aurum4_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 5
+```{r observation5, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation5"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum5 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum5, file.path(PATH_W,"observation_aurum5_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 6
+```{r observation6, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation6"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum6 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum6, file.path(PATH_W,"observation_aurum6_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 7
+```{r observation7, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation7"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum7 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum7, file.path(PATH_W,"observation_aurum7_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 8
+```{r observation8, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation8"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum8 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum8, file.path(PATH_W,"observation_aurum8_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 9
+```{r observation9, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation9"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum9 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum9, file.path(PATH_W,"observation_aurum9_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Read Observation table 10
+```{r observation10, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation10"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum10 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum10, file.path(PATH_W,"observation_aurum10_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+# Read Observation table 11
+```{r observation11, eval=TRUE, warning=FALSE, message=FALSE}
+start_time <- Sys.time()
+setwd(file.path(PATH_D, "Aurum/Data/Primary_Care/Observation/Observation11"))
+#observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), patid %in% aurum_main_diseases_matched$patid) } ))
+observation_aurum = rbindlist( lapply(list.files(), function(x) { subset(fread(x), medcodeid %in% diag_codes_table_aurum$medcode_aurum) } ))
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+nrow(observation_aurum[is.na(obsdate)])
+100 *(nrow(observation_aurum[is.na(obsdate)]) / nrow(observation_aurum)) # % of records with missing dates
+observation_aurum = observation_aurum[!is.na(obsdate)] # exclude events with missing dates
+format(nrow(observation_aurum), big.mark="'") 
+observation_aurum11 = observation_aurum[,.(patid, obsid, obsdate, medcodeid, value, numunitid)] # select relevant columns
+fwrite(observation_aurum11, file.path(PATH_W,"observation_aurum11_diagnoses.txt.gz")) # Save table
+rm(list=setdiff(ls(), c("aurum_main_diseases_matched","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "diag_codes_table_aurum", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```
+
+# Combine all tables
+```{r combine, eval=TRUE, warning=FALSE, message=FALSE}
+# Set 1
+start_time <- Sys.time()
+observation_aurum1 = fread(file.path(PATH_W,"observation_aurum1_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum2 = fread(file.path(PATH_W,"observation_aurum2_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum3 = fread(file.path(PATH_W,"observation_aurum3_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum4 = fread(file.path(PATH_W,"observation_aurum4_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum5 = fread(file.path(PATH_W,"observation_aurum5_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+#observation_aurum_set1 = rbind(observation_aurum1, observation_aurum2, observation_aurum3, observation_aurum4, observation_aurum5)
+#fwrite(observation_aurum_set1, file.path(PATH_W,"observation_aurum_set1.txt.gz")) # Save table
+#rm(list=setdiff(ls(), c("observation_aurum_set1","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "all_codes_table", "comorb_codes", "comorb_read_codes", "comorb_icd_codes", "start_time", "all_obs_codes")))
+#gc()
+#end_time <- Sys.time()
+#end_time - start_time 
+
+# Set 2
+#start_time <- Sys.time()
+observation_aurum6 = fread(file.path(PATH_W,"observation_aurum6_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum7 = fread(file.path(PATH_W,"observation_aurum7_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum8 = fread(file.path(PATH_W,"observation_aurum8_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum9 = fread(file.path(PATH_W,"observation_aurum9_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum10 = fread(file.path(PATH_W,"observation_aurum10_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+observation_aurum11= fread(file.path(PATH_W,"observation_aurum11_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "obsdate"="Date")) 
+#observation_aurum_set2 = rbind(observation_aurum6, observation_aurum7, observation_aurum8, observation_aurum9, observation_aurum10, observation_aurum11)
+#fwrite(observation_aurum_set2, file.path(PATH_W,"observation_aurum_set2.txt.gz")) # Save table
+observation_aurum_diagnoses_set = rbind(observation_aurum1, observation_aurum2, observation_aurum3, observation_aurum4, observation_aurum5, observation_aurum6, observation_aurum7, observation_aurum8, observation_aurum9, observation_aurum10, observation_aurum11)
+format(nrow(observation_aurum_diagnoses_set), big.mark="'")  # number of records in table
+head(observation_aurum_diagnoses_set)
+fwrite(observation_aurum_diagnoses_set, file.path(PATH_W,"observation_aurum_diagnoses.txt.gz"),     ) # Save table
+rm(list=setdiff(ls(), c("observation_aurum_diagnoses_set","study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_L", "all_codes_table", "comorb_codes", "comorb_read_codes", "comorb_icd_codes", "start_time", "all_obs_codes")))
+gc()
+end_time <- Sys.time()
+end_time - start_time 
+```

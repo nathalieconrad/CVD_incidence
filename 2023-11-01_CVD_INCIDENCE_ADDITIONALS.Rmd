@@ -1,0 +1,1024 @@
+---
+title: "CVD Incidence - EXTRACTION ADDITIONALS"
+author: "Nathalie Conrad"
+date: "October 2023"
+output: html_document
+---
+
+## DATA EXTRACTION, 2nd delivery
+
+# LIBRARIES AND SETTINGS
+```{r, warning=FALSE, message=FALSE}
+#install.packages("bestNormalize")
+library(knitr)
+library(dplyr)
+library(table1)
+library(xtable)
+library(data.table)
+library(gdata)
+library(ggplot2)
+library(rapportools)
+library(rapport)
+library(bit64)
+library(R.utils)
+library(bestNormalize)
+library(gridExtra)
+#devtools::install_github("ngreifer/MatchIt")
+#packageVersion('MatchIt')
+#start_time <- Sys.time()
+#end_time <- Sys.time()
+#end_time - start_time 
+```
+
+## Work Environment
+```{r, warning=FALSE, message=FALSE}
+# Secure data directories
+PATH_D = "/Users/u0133446/CPRD-2020/Final_Delivery1_19_156" # path to data directory
+PATH_W = "/Users/u0133446/CPRD-2020/Workspace/CVD_incidence" # path to workspace directory
+PATH_W_all = "/Users/u0133446/CPRD-2020/Workspace" # path to workspace directory
+PATH_L = "/Users/u0133446/CPRD-2020/Final_Delivery1_19_156/Lookups" # path to lookups directory
+#load(file.path(PATH_W,"2022-02-18SelectedWorkspaceIdentification.RData"))
+
+# Dropbox directories for diagnostic codes, aggregated tables and plots
+PATH = "/Users/u0133446/Dropbox/Leuven/INF-CVD" # path to dropbox directory
+PATH_P = "/Users/u0133446/Dropbox/Leuven/INF-CVD/CPRD-2020_non_data/Plots/CVD_incidence" # path to plots directory
+```
+
+## Study Dates
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+study_start_date = as.Date("01/01/2000", format="%d/%m/%Y")
+linkage_start_date = as.Date("01/01/1998", format="%d/%m/%Y")
+study_end_date = as.Date("30/06/2019", format="%d/%m/%Y")
+# data_source	start	end
+# hes_apc	01/04/1997	30/06/2019
+# hes_acp	01/10/1997	31/03/2008
+# hes_op	01/04/2003	30/06/2019
+# ons_death	02/01/1998	01/05/2019
+```
+
+
+# Import data
+```{r , eval=TRUE, warning=FALSE, message=FALSE}
+# all first diagnoses
+diagnoses_all_first_denom= fread(file.path(PATH_W,"diagnoses_all_first_denom.txt.gz"), colClasses=c("patid"="integer64", "eventdate"="Date", "first_AD_date"="Date" , "first_INF_date"="Date", "first_HER_date"="Date", "first_CVD_date"="Date", "first_CVD_hes_primary_date"="Date", "regdate"="Date", "end_date"="Date", "start_date"="Date", "lcdate"="Date", "todate"="Date")) # all first diagnoses for diseases included in the study
+summary(diagnoses_all_first_denom$eventdate)
+head(diagnoses_all_first_denom)
+format(nrow(diagnoses_all_first_denom), big.mark="'")  
+levels(as.factor(diagnoses_all_first_denom$disease))
+diagnoses_all_first_denom[,diag_date:= eventdate]
+diagnoses_all_first_denom[,row_ID:= paste(db_patid,"_", disease_short, sep="")]
+colnames(diagnoses_all_first_denom)
+
+# Define row_ID (unique patid-disease tuple)
+diagnoses_all_first_denom[,row_ID := paste(db_patid, disease_short, sep ="_")]
+format(nrow(diagnoses_all_first_denom), big.mark="'")  
+diagnoses_all_first_denom
+
+diagnoses_all_first_denom = diagnoses_all_first_denom[!is.na(eventdate)]
+diagnoses_all_first_denom[,diag_date:=eventdate]
+format(nrow(diagnoses_all_first_denom), big.mark="'")  
+
+# subset GOLD patients
+diagnoses_all_first_denom_gold = diagnoses_all_first_denom[substr(db_patid,1,1) == "G"]
+format(nrow(diagnoses_all_first_denom_gold), big.mark="'")  
+
+# subset Aurum patients
+diagnoses_all_first_denom_aurum = diagnoses_all_first_denom[substr(db_patid,1,1) == "A"]
+format(nrow(diagnoses_all_first_denom_aurum), big.mark="'")  
+
+nrow(diagnoses_all_first_denom) - nrow(diagnoses_all_first_denom_gold) - nrow(diagnoses_all_first_denom_aurum) # check that this is 0
+
+
+```
+
+# Diagnostic codes
+```{r codes, eval=TRUE, warning=FALSE, message=FALSE}
+# Observations
+## Read code tables
+obs_codes = data.table(read.xls(file.path(PATH, "Phenotyping/Aurum_observations/observation_codes_FINAL.xls"), sheet=1))
+obs_codes = obs_codes[include==1]
+obs_codes$medcode_aurum_orig = obs_codes$medcode_aurum
+obs_codes$unique_ID = as.character(obs_codes$unique_ID)
+obs_codes[,medcode_aurum := as.integer64.character(substr(unique_ID, 3, nchar(unique_ID)))]
+nrow(obs_codes[is.na(medcode_aurum)])
+summary(obs_codes$medcode_aurum)
+nrow(obs_codes)
+head(obs_codes)
+levels(obs_codes$add_type)
+
+# Comorbidities
+comorb_codes_table_1 = data.table(read.table(file.path(PATH,"/Phenotyping/Comorbidities/2022-02-03_FINAL_Comorbidities_diagnostic_codes_table.txt"), header = TRUE, sep="\t", colClasses=c("medcode_aurum"="integer64"))) # This table includes only codes considered for final analysis (include == 1)
+head(comorb_codes_table_1)
+levels(as.factor(comorb_codes_table_1$include))
+levels(as.factor(comorb_codes_table_1$disease))
+colnames(comorb_codes_table_1)
+comorb_codes_table_1[disease == "Type 2 diabetes"]
+#nrow(diag_codes_table_1)
+
+# Ethnicity
+ethnicity_codes_gold_aurum = fread(file.path(PATH,"/Phenotyping/Final_AD_INF_CVD/2022-06-21_ethnicity_codes_gold_aurum.txt"), sep="\t")
+head(ethnicity_codes_gold_aurum)
+nrow(ethnicity_codes_gold_aurum)
+#ethnicity_codes_gold_aurum[category1==""]
+setnames(ethnicity_codes_gold_aurum, old = c("description", "category1", "category2"), new = c("ethnicity_description", "ethnicity_category1", "ethnicity_category2"))
+ethnicity_codes_gold_aurum[,medcode_aurum := as.integer64(medcode_aurum)]
+```
+
+# GOLD - Additionals
+## Read clinical table
+```{r clinical, eval=TRUE, warning=FALSE, message=FALSE}
+#clinical_gold = fread(file.path(PATH_D, "GOLD/Data/Primary_Care/Clinical/19_156_Extract_Clinical_001.txt.gz")) 
+setwd(file.path(PATH_D, "GOLD/Data/Primary_Care/Clinical"))
+clinical_gold = rbindlist( lapply(list.files(), function(x) {fread(x)} ))
+clinical_gold[,eventdate:=as.Date(eventdate, format="%d/%m/%Y")] #set date format
+format(nrow(clinical_gold), big.mark="'") 
+nrow(clinical_gold[is.na(eventdate)]) # check whether there are corrupt eventdates
+100 *(nrow(clinical_gold[is.na(eventdate)]) / nrow(clinical_gold)) # % of records with missing dates
+head(clinical_gold[is.na(eventdate)])
+#clinical_gold[patid == 110003 & medcode == 56083] # is this NA?
+clinical_gold = clinical_gold[!is.na(eventdate)] # exclude events with missing dates
+head(clinical_gold)
+format(nrow(clinical_gold), big.mark="'") 
+
+# Subset to patient in present analysis set
+clinical_gold = clinical_gold[patid %in% diagnoses_all_first_denom_gold$patid] 
+format(nrow(clinical_gold), big.mark="'") 
+```
+
+## Read additionals table
+```{r add, eval=TRUE, warning=FALSE, message=FALSE}
+#additionals_gold = fread(file.path(PATH_D, "GOLD/Data/Primary_Care/Additionals/19_156_Extract_Additional_001.txt.gz")) 
+setwd(file.path(PATH_D, "GOLD/Data/Primary_Care/Additionals"))
+additionals_gold = rbindlist( lapply(list.files(), function(x) {fread(x)} ))
+head(additionals_gold)
+format(nrow(additionals_gold), big.mark="'")
+
+# Subset to patient in present analysis set
+additionals_gold = additionals_gold[patid %in% diagnoses_all_first_denom_gold$patid]
+
+# Subset to relevant enttypes
+additionals_gold = additionals_gold[enttype %in% c("1", "13", "4")]
+format(nrow(additionals_gold), big.mark="'") 
+```
+
+## Get additional's eventdate
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+#format(nrow(clinical_gold), big.mark="'")  
+#colnames(clinical_gold)
+additionals_gold = merge(x=additionals_gold, y=clinical_gold[,.(patid, adid, eventdate)], by = c("patid", "adid"), all.x = TRUE)
+#additionals_gold = merge(x=additionals_gold, y=unique(diagnoses_all_first_denom_gold[,.(patid, birthyear)]), by = c("patid"), all.x = TRUE)
+additionals_gold_0= additionals_gold
+#additionals_gold= additionals_gold_0
+format(nrow(additionals_gold_0), big.mark="'") 
+```
+
+## Get diagnosis date
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+diagnoses_all_first_denom_gold
+additionals_gold = merge(x=additionals_gold, y=unique(diagnoses_all_first_denom_gold[,.(patid, disease, diag_date, row_ID)]), by = c("patid"), all.x = TRUE, allow.cartesian = TRUE)
+format(nrow(additionals_gold), big.mark="'") 
+#nrow(additionals_gold[is.na(birthyear)])
+nrow(additionals_gold[is.na(diag_date)])
+
+#additionals_gold_select[,eventdate:=NULL]
+#additionals_gold[, eventdate:= as.Date(as.character(eventdate), format="%d/%m/%Y")]
+class(clinical_gold$eventdate)
+class(additionals_gold$eventdate)
+
+nrow(clinical_gold[is.na(eventdate)]) # should be 0!
+nrow(additionals_gold[is.na(eventdate)]) # should be 0!
+
+format(nrow(additionals_gold), big.mark="'")  # number of rows should not have changed!
+additionals_gold = additionals_gold[!is.na(eventdate)] # exclude events with missing dates
+format(nrow(additionals_gold), big.mark="'")  # number of rows should not have changed!
+head(additionals_gold)
+```
+
+## Select unique baseline additional as the latest measurement within 2 years prior to diagnosis
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+class(additionals_gold$eventdate)
+class(additionals_gold$diag_date)
+#additionals_gold_select[, index_date:= as.Date(as.character(index_date), format="%d/%m/%Y")]
+additionals_gold_baseline = additionals_gold[(eventdate <= diag_date + 1) & (eventdate > (diag_date - 365*2))] # select only events recorded in the two year prior to index date
+head(additionals_gold)
+additionals_gold_baseline = additionals_gold_baseline[,.SD[which.max(eventdate)], by = .(row_ID, enttype)] # select latest record within given time frame
+head(additionals_gold_baseline)
+nrow(additionals_gold)
+nrow(additionals_gold_baseline)
+```
+
+## Blood pressure - 2 years prior
+```{r bp_gold, eval=TRUE, warning=FALSE, message=FALSE}
+blood_pressure_gold = subset(additionals_gold_baseline, enttype == 1, select=c(patid, row_ID, diag_date, adid, eventdate, data1, data2))
+class(blood_pressure_gold$data1)
+class(blood_pressure_gold$data2)
+blood_pressure_gold[,data1:=as.numeric(data1)]
+blood_pressure_gold[,data2:=as.numeric(data2)]
+nrow(blood_pressure_gold[is.na(eventdate)])
+setnames(blood_pressure_gold, old=c("data1", "data2", "eventdate"), new =c("DBP", "SBP", "BP_eventdate"))
+class(blood_pressure_gold$DBP1)
+class(blood_pressure_gold$SBP1)
+
+
+# Exclude measurements outside of sensical range (60 < SBP > 250 or 30 < DBP< 180)
+blood_pressure_gold[DBP < 30 | DBP > 180, DBP := NA]
+blood_pressure_gold[SBP < 60 | SBP > 250, SBP := NA]
+
+
+blood_pressure_gold = blood_pressure_gold[, .(row_ID, DBP, SBP, BP_eventdate)]
+nrow(blood_pressure_gold)
+```
+
+## Weight - 2 years prior 
+```{r BMI_gold, eval=TRUE, warning=FALSE, message=FALSE}
+#13	Weight	Clinical	Examination Findings	3	Weight in kilos
+weight_gold = subset(additionals_gold_baseline, enttype == 13, select=c(patid, row_ID, diag_date, adid, eventdate, data1, data3))
+setnames(weight_gold, old=c("data1", "data3", "eventdate"), new =c("weight_kg", "BMI", "BMI_eventdate"))
+nrow(weight_gold[is.na(BMI_eventdate)])
+class(weight_gold$BMI)
+class(weight_gold$weight_kg)
+weight_gold[,BMI:=as.numeric(BMI)]
+weight_gold[,weight_kg:=as.numeric(weight_kg)]
+class(weight_gold$BMI)
+class(weight_gold$weight_kg)
+nrow(weight_gold)
+nrow(weight_gold[is.na(BMI) & !is.na(weight_kg)])
+
+# Exclude non-sensical results (BMI > 60 or BMI<10)
+weight_gold[BMI < 10, BMI := NA]
+weight_gold[BMI > 60, BMI := NA]
+weight_gold[weight_kg < 1, weight_kg := NA]
+weight_gold[weight_kg > 250, weight_kg := NA]
+
+weight_gold = weight_gold[, .(row_ID, weight_kg, BMI, BMI_eventdate)]
+head(weight_gold)
+```
+
+
+## Smoking - 2 years prior 
+```{r smoking_gold, eval=TRUE, warning=FALSE, message=FALSE}
+#nrow(subset(additionals_baseline, enttype == 4))
+smoking_gold = subset(additionals_gold_baseline, enttype == 4, select=c(patid, row_ID, diag_date, adid, eventdate, data1, data2, data5, data6))
+setnames(smoking_gold, old=c("data1", "data2", "data5","data6", "eventdate"), new =c("smok_status_code", "smok_cig_day", "smok_start", "smok_stop", "smok_eventdate"))
+#smoking_gold[,smok_start:=as.Date(smok_start, format="%d/%m/%Y")] #set date format
+#smoking_gold[,smok_stop:=as.Date(smok_stop, format="%d/%m/%Y")] #set date format
+class(smoking_gold$smok_status_code)
+smoking_gold[,smok_status_code:=as.numeric(smok_status_code)] #set numeric format
+nrow(smoking_gold[is.na(smok_eventdate)])
+#smoking_gold$smok_years = round((smoking_gold$smok_start - smoking_gold$smok_stop)/365, 2)
+head(smoking_gold)
+
+# smoking status description
+smok_status_table = fread(file.path(PATH_L, "/GOLD/TXTFILES/YND.txt"), col.names = c("smok_status_code", "smok_status_name"))
+smoking_gold = merge(x=smoking_gold, y= smok_status_table, by = "smok_status_code", all.x = TRUE, sort = FALSE)
+smoking_gold$smok_status_name = as.character(smoking_gold$smok_status_name)
+smoking_gold[smok_status_name=="Data Not Entered", smok_status_name := NA] 
+smoking_gold$smok_status_name = as.factor(smoking_gold$smok_status_name)
+levels(smoking_gold$smok_status_name)
+
+smoking_gold= smoking_gold[, .(row_ID, smok_status_name, smok_eventdate)]
+head(smoking_gold)
+```
+
+
+## Cholesterol - 2 years prior
+### Read Test table
+```{r test, eval=TRUE, warning=FALSE, message=FALSE}
+# Data are extracted from the CPRD 'test' table using: #entity codes 338 (HDL/LDL ratio) OR one of: 288 (Other laboratory tests), 438	(Other biochemistry test), 480	(Other Lab Result Information)  + medcode indicative of HDL : LDL ratio:
+# 14105 Cholesterol/HDL ratio
+# 14371	Serum cholesterol/HDL ratio
+# 14372	Total cholesterol:HDL ratio
+# 40935	Plasma cholesterol/HDL ratio
+chol_medcodes = c(14105, 14371, 14372, 40935)
+
+#test_gold = fread(file.path(PATH_D, "GOLD/Data/Primary_Care/Test/19_156_Extract_Test_001.txt.gz")) 
+#head(test_gold)
+#test_gold_chol = test_gold[enttype == "338" | (enttype %in% c("288","438", "480") & medcode %in% chol_medcodes)] 
+#class(test_gold$eventdate)
+setwd(file.path(PATH_D, "GOLD/Data/Primary_Care/Test"))
+test_gold_chol = rbindlist( lapply(list.files(), function(x) {subset(fread(x,select = c("patid", "eventdate", "data2", "medcode", "enttype") ), enttype == "338" | (enttype %in% c("288","438", "480") & medcode %in% chol_medcodes) )} ))
+test_gold_chol[,eventdate:=as.Date(eventdate, format="%d/%m/%Y")] #set date formathead(test_gold_chol)
+
+format(nrow(test_gold_chol), big.mark="'")  
+nrow(test_gold_chol[is.na(eventdate)]) 
+test_gold_chol = test_gold_chol[!is.na(eventdate)] # exclude events with missing dates
+
+# Subset to patient in present analysis set
+test_gold_chol = test_gold_chol[patid %in% diagnoses_all_first_denom_gold$patid] 
+format(nrow(test_gold_chol), big.mark="'") 
+
+```
+
+### Extract cholesterol ratio data
+```{r test2, eval=TRUE, warning=FALSE, message=FALSE}
+setnames(test_gold_chol, old=c("data2", "eventdate"), new =c("chol_ratio", "chol_eventdate"))
+colnames(test_gold_chol)
+
+# Check range
+class(test_gold_chol$chol_ratio)
+summary(test_gold_chol$chol_ratio)
+format(nrow(test_gold_chol), big.mark="'")  
+
+# Exclude non-sensical results (0 < ratio > 10)
+test_gold_chol[chol_ratio > 10 | chol_ratio < 0, chol_ratio := NA]
+
+# Check range
+summary(test_gold_chol$chol_ratio)
+format(nrow(test_gold_chol), big.mark="'") 
+
+# Check associated medcodes
+levels(as.factor(test_gold_chol$medcode))
+levels(as.factor(test_gold_chol[enttype==338]$medcode))
+levels(as.factor(test_gold_chol[medcode %in% chol_medcodes]$enttype))
+```
+
+### Get diag date 
+```{r test3, eval=TRUE, warning=FALSE, message=FALSE}
+test_gold_chol = merge(x=test_gold_chol, y=unique(diagnoses_all_first_denom_gold[,.(patid, disease, diag_date, row_ID)]), by = c("patid"), all.x = TRUE, allow.cartesian = TRUE)
+#nrow(gold_main_diseases_matched[,.(patid, row_ID, index_date)])
+#nrow(unique(gold_main_diseases_matched[,.(patid, row_ID, index_date)]))
+format(nrow(test_gold_chol), big.mark="'") 
+nrow(test_gold_chol[is.na(diag_date)])
+```
+
+### Select unqique baseline cholesterol measurement as the latest measurement within 2 years prior to diagnosis
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+class(test_gold_chol$chol_eventdate)
+class(test_gold_chol$index_date)
+#additionals_gold_select[, index_date:= as.Date(as.character(index_date), format="%d/%m/%Y")]
+test_gold_chol_baseline = test_gold_chol[(chol_eventdate <= diag_date + 1) & (chol_eventdate > (diag_date - 365*2))] # select only events recorded in the two year prior to index date
+test_gold_chol_baseline = test_gold_chol_baseline[,.SD[which.max(chol_eventdate)], by = .(row_ID)] # select latest record within given time frame
+head(test_gold_chol_baseline)
+format(nrow(test_gold_chol_baseline), big.mark="'") 
+
+# Select and rename columns
+chol_gold = test_gold_chol_baseline[, .(row_ID, chol_ratio, chol_eventdate)]
+format(nrow(chol_gold), big.mark="'") 
+```
+
+
+# GOLD - Comorbidities
+## Extract comorbidities' diagnoses - GOLD primary care
+```{r comorb_gold, eval=TRUE, warning=FALSE, message=FALSE}
+#comorb_gold_pc= subset(fread(file.path(PATH_D,"/GOLD/Data/Primary_Care/Clinical/19_156_Extract_Clinical_001.txt.gz"), select = c("patid", "eventdate", "medcode")), medcode %in% comorb_codes_table_1[codetype == "gold"]$medcode_gold)
+setwd(file.path(PATH_D, "GOLD/Data/Primary_Care/Clinical"))
+comorb_gold_pc = rbindlist( lapply(list.files(), function(x) {subset(fread(x,select = c("patid", "eventdate", "medcode") ), medcode %in% comorb_codes_table_1[codetype == "gold"]$medcode_gold)} ))
+comorb_gold_pc[,eventdate:=as.Date(eventdate, format="%d/%m/%Y")] #set date format
+head(comorb_gold_pc)
+format(nrow(comorb_gold_pc), big.mark="'") 
+
+comorb_gold_pc[,database := "CPRD GOLD"] 
+comorb_gold_pc[,codetype := "READ"] 
+comorb_gold_pc[,unique_ID := paste("G",medcode, sep="_")] # Define unique_ID
+setnames(comorb_gold_pc, old=c("eventdate", "medcode"), new =c("diag_date", "diag_code")) # date of diagnosis = date of discharge 
+nrow(comorb_gold_pc[is.na(diag_date),]) # double check number of corrupt eventdates
+comorb_gold_pc = comorb_gold_pc[!is.na(diag_date)] # exclude events with missing date
+comorb_gold_pc = comorb_gold_pc[duplicated(comorb_gold_pc)==F,] # Exclude duplicates
+format(nrow(comorb_gold_pc), big.mark="'") 
+colnames(comorb_gold_pc)
+```
+
+## Extract comorbidities' diagnoses - HES
+```{r comorb_gold_hes, eval=TRUE, warning=FALSE, message=FALSE}
+#comorb_gold_hes = subset(fread(file.path(PATH_D, "GOLD/Data/Linked_Data/HES_Diagnoses_by_hosp/hes_diagnosis_hosp_19_156A_DM.txt.gz")), icd %in% comorb_codes_table_1[codetype == "icd"]$icd_code)
+
+setwd(file.path(PATH_D, "GOLD/Data/Linked_Data/HES_Diagnoses_by_hosp"))
+comorb_gold_hes = rbindlist( lapply(list.files(), function(x) {subset(fread(x), icd %in% comorb_codes_table_1[codetype == "icd"]$icd_code)} ))
+
+nrow(comorb_gold_hes[icdx != ""])
+comorb_gold_hes[icdx %in% c("-","--","~","-~", "A", "D", "d", "Z", "-A","-D", "X", "E", "+", "*", ",", "!", "G", ".", "H", "F", "J", "K", "R", "N", "DN", "C", "I", "DH", "DR", "H3", "+L", "DG", "a", "M", "#", "~Y", "S", "0D", "2D", "2~", "9~","9D", " ")]$icdx = ""  # Exclude unhelpful modifiers
+nrow(comorb_gold_hes[icdx != ""])
+comorb_gold_hes[,icd_5:= paste(icd, icdx, sep = "")] # concatenate ICD codes and modifiers as one single code
+comorb_gold_hes1 = subset(comorb_gold_hes, icd %in% comorb_codes_table_1[codetype == "icd"]$icd_code)
+comorb_gold_hes2 = subset(comorb_gold_hes, icd_5 %in% comorb_codes_table_1[codetype == "icd"]$icd_code)
+nrow(comorb_gold_hes1)
+nrow(comorb_gold_hes2)
+nrow(comorb_gold_hes1)-nrow(comorb_gold_hes2)
+fsetdiff(comorb_gold_hes1, comorb_gold_hes2, all = TRUE)
+fsetdiff(comorb_gold_hes2, comorb_gold_hes1, all = TRUE)
+comorb_gold_hes = comorb_gold_hes1
+
+comorb_gold_hes[,admidate:=as.Date(admidate, format="%d/%m/%Y")] #set date format
+comorb_gold_hes[,discharged:=as.Date(discharged, format="%d/%m/%Y")] #set date format
+head(comorb_gold_hes)
+format(nrow(comorb_gold_hes), big.mark="'") 
+
+comorb_gold_hes[,database := "HES APC GOLD"] 
+comorb_gold_hes[,codetype := "ICD"] 
+comorb_gold_hes[,unique_ID := paste("I",icd, sep="_")] # Define unique_ID
+setnames(comorb_gold_hes, old=c("discharged", "icd", "icdx"), new =c("diag_date", "diag_code", "icd_modifier")) # date of diagnosis = date of discharge 
+nrow(comorb_gold_hes[is.na(diag_date),]) # double check number of corrupt eventdates
+comorb_gold_hes[is.na(diag_date), diag_date:= admidate ] # where discharge date is missing, use admission date
+nrow(comorb_gold_hes[is.na(diag_date),]) # double check number of corrupt eventdates
+comorb_gold_hes = comorb_gold_hes[!is.na(diag_date)] # exclude events where both admission and discharge dates are missing
+nrow(comorb_gold_hes[is.na(diag_date)])
+
+comorb_gold_hes = comorb_gold_hes[duplicated(comorb_gold_hes)==F,] # Exclude duplicates
+format(nrow(comorb_gold_hes), big.mark="'") 
+colnames(comorb_gold_hes)
+```
+
+## Combine GOLD and HES comorbidities
+```{r Combine_comorb_gold, eval=TRUE, warning=FALSE, message=FALSE}
+# Combine tables
+comorb_gold = rbind(comorb_gold_pc, comorb_gold_hes[,.(patid, diag_date, diag_code, database, codetype, unique_ID)])
+
+# Subset to patient in present analysis set
+comorb_gold = comorb_gold[patid %in% unique(diagnoses_all_first_denom_gold$patid)] 
+
+# Add disease description
+format(nrow(comorb_gold), big.mark="'") 
+nrow(comorb_codes_table_1) # number of rows
+head(comorb_gold)
+
+comorb_gold = merge(comorb_gold, unique(comorb_codes_table_1[,.(disease, codetype, description, unique_ID)]), by ="unique_ID", all.x = TRUE, allow.cartesian=TRUE)
+head(comorb_gold)
+nrow(comorb_gold[is.na(disease)])
+format(nrow(comorb_gold), big.mark="'") 
+```
+
+## Select first diagnosis date
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+class(comorb_gold$diag_date)
+nrow(comorb_gold[is.na(diag_date)])
+setnames(comorb_gold, old="diag_date", new ="comorb_diag_date")
+comorb_gold = merge(comorb_gold, diagnoses_all_first_denom_gold[,.(patid, row_ID, diag_date)], by = "patid", all.x =TRUE, allow.cartesian = TRUE)
+head(comorb_gold)
+comorb_gold_first = comorb_gold[,.SD[which.min(diag_date)], by = .(patid, disease)]
+format(nrow(comorb_gold_first), big.mark="'") 
+```
+
+## Create comorbidities flag
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+# Get index date
+format(nrow(comorb_gold_first), big.mark="'") 
+colnames(comorb_gold_first)
+comorb_gold_first = comorb_gold_first[patid %in% unique(diagnoses_all_first_denom_gold$patid)] # subset to patient in present analysis set
+#comorb_gold_first = merge(comorb_gold_first, gold_main_diseases_matched_add[,.(patid, row_ID, index_date)], by = "patid", all.x =TRUE)
+format(nrow(comorb_gold_first), big.mark="'") 
+nrow(comorb_gold_first[is.na(diag_date)])
+
+# Add short disease description
+levels(as.factor(comorb_gold_first$disease))
+disease_short = data.table(disease = c("Cancer","CKD", "Type 2 diabetes", "Dyslipidaemia" , "Hypertension", "Obesity", "Psoriatic arthritis", "Hyperthyroidism"), disease_short = c("CAN", "CKD", "DIA2", "DYS", "HYP", "OBE", "PSA", "HTH"))
+comorb_gold_first = merge(comorb_gold_first, disease_short, by = "disease")
+format(nrow(comorb_gold_first), big.mark="'") 
+
+# Check dates
+class(comorb_gold_first$diag_date)
+class(comorb_gold_first$comorb_diag_date)
+nrow(comorb_gold_first[is.na(diag_date)])
+nrow(comorb_gold_first[is.na(comorb_diag_date)])
+table(year(comorb_gold_first$comorb_diag_date))
+
+# Transform diagnoses into long format with flag and date for each condition
+comorb_gold_first_index_long1 = dcast(comorb_gold_first, row_ID ~ paste(disease_short, "_any_time_flag", sep=""), value.var = c("disease"), fun.aggregate = list(length))
+comorb_gold_first_index_long2 = dcast(comorb_gold_first, row_ID ~ paste(disease_short, "_any_time_date", sep=""), value.var = c("comorb_diag_date"), fun.aggregate = pmin, fill=NA)
+head(comorb_gold_first_index_long2)
+comorb_gold_first_index_long = merge(comorb_gold_first_index_long1, comorb_gold_first_index_long2, by = c("row_ID"), all = TRUE )
+head(comorb_gold_first_index_long)
+#comorb_aurum_first_index_long[row_ID == "G4012710677_NA"]
+
+# save table
+fwrite(comorb_gold_first_index_long, file.path(PATH_W,"CVD_gold_comorbidities.txt.gz")) 
+
+```
+
+# GOLD - Ethnicity
+```{r ethnicity_gold, eval=TRUE, warning=FALSE, message=FALSE}
+## Ethnicity CPRD GOLD
+setwd(file.path(PATH_D, "GOLD/Data/Primary_Care/Clinical"))
+#gold_ethnicity_primary_care= fread(file.path(PATH_D,"/GOLD/Data/Primary_Care/Clinical/19_156_Extract_Clinical_001.txt.gz"), header = T, sep="\t")
+#subset(gold_ethnicity_primary_care, medcode %in% ethnicity_codes_gold_aurum$medcode_gold)
+gold_ethnicity_primary_care = rbindlist( lapply(list.files(), function(x) {subset(fread(x), medcode %in% ethnicity_codes_gold_aurum$medcode_gold)} ))
+format(nrow(gold_ethnicity_primary_care), big.mark="'")  # Check total number of events
+gold_ethnicity_primary_care[,eventdate:=as.Date(eventdate, format="%d/%m/%Y")] # Set date format
+nrow(gold_ethnicity_primary_care[is.na(eventdate),]) # Check number of corrupt eventdates
+gold_ethnicity_primary_care=gold_ethnicity_primary_care[!is.na(eventdate),] # Exclude events with corrupt date
+nrow(gold_ethnicity_primary_care)
+gold_ethnicity_primary_care=gold_ethnicity_primary_care[,.SD[which.max(eventdate)], by = c("patid")] # select latest ethnicity recording
+nrow(gold_ethnicity_primary_care)
+#Merge with code dictionary
+gold_ethnicity_primary_care_dict = merge(gold_ethnicity_primary_care[,.(patid, medcode, eventdate)], ethnicity_codes_gold_aurum[,.(medcode_gold,readcode, ethnicity_description, ethnicity_category1, ethnicity_category2)], by.x = "medcode", by.y = "medcode_gold", all.x=T, allow.cartesian=TRUE)
+nrow(gold_ethnicity_primary_care_dict)
+head(gold_ethnicity_primary_care_dict)
+setnames(gold_ethnicity_primary_care_dict, old = c("readcode", "eventdate"), new = c("ethnicity_medcode", "ethnicity_eventdate"))
+nrow(gold_ethnicity_primary_care_dict[is.na(ethnicity_category1)])
+levels(as.factor(gold_ethnicity_primary_care_dict$ethnicity_category2)) # Codes checked (these are codes that have been excluded from final analyses) 
+gold_ethnicity_primary_care_dict[,ethnicity_source:= "CPRD GOLD"]
+colnames(gold_ethnicity_primary_care_dict)
+
+## Ethnicity HES GOLD
+gold_ethnicity_hes = fread(file.path(PATH_D,"/GOLD/Data/Linked_Data/HES_Patient/hes_patient_19_156A_DM.txt.gz"), header = T, sep="\t")
+#subset(gold_ethnicity_primary_care, medcode %in% ethnicity_codes_gold_aurum$medcode_gold)
+gold_ethnicity_hes
+format(nrow(gold_ethnicity_hes), big.mark="'")  # Check total number of records
+levels(as.factor(gold_ethnicity_hes$gen_ethnicity))
+setnames(gold_ethnicity_hes, old = c("gen_ethnicity"), new = c("ethnicity_description"))
+gold_ethnicity_hes[ethnicity_description %in% c("Bangladesi", "Bl_Afric", "Bl_Carib", "Bl_Other", "Chinese",  "Indian",  "Mixed", "Oth_Asian", "Other", "Pakistani"), ethnicity_category2 := "Other"]
+gold_ethnicity_hes[ethnicity_description %in% c("White" ), ethnicity_category2 := "White"]
+gold_ethnicity_hes[ethnicity_description %in% c("White" ), ethnicity_category1 := "White"]
+gold_ethnicity_hes[ethnicity_description %in% c("Bangladesi", "Chinese",  "Indian",  "Oth_Asian",  "Pakistani"), ethnicity_category1 := "Asian"]
+gold_ethnicity_hes[ethnicity_description %in% c("Bl_Afric", "Bl_Carib", "Bl_Other"), ethnicity_category1 := "African/Caribean"]
+gold_ethnicity_hes[ethnicity_description %in% c("Mixed"), ethnicity_category1 := "Mixed"]
+gold_ethnicity_hes[ethnicity_description %in% c("Other"), ethnicity_category1 := "Other"]
+gold_ethnicity_hes = gold_ethnicity_hes[!is.na(ethnicity_category2)]
+format(nrow(gold_ethnicity_hes), big.mark="'")  # Check total number of records
+gold_ethnicity_hes[,ethnicity_source:= "GOLD HES"]
+
+## Merge Ethnicity in CPRD and HES GOLD, select HES record in case of duplicate
+gold_ethnicity = rbind(gold_ethnicity_hes[,.(patid, ethnicity_description, ethnicity_category1, ethnicity_category2, ethnicity_source)], 
+gold_ethnicity_primary_care_dict[!(patid %in% gold_ethnicity_hes$patid),.(patid, ethnicity_description, ethnicity_category1, ethnicity_category2, ethnicity_source)], fill = TRUE)
+nrow(gold_ethnicity)-length(unique(gold_ethnicity$patid)) # check that there are no duplicate patids
+colnames(gold_ethnicity)
+
+#denominator_gold[,patid := as.integer64(patid)]
+#denominator_gold = merge(denominator_gold, gold_ethnicity, by= "patid", all.x = TRUE)
+```
+
+# GOLD - Merge baseline additionals with patient table
+```{r baseline_gold, eval=TRUE, warning=FALSE, message=FALSE}
+format(nrow(diagnoses_all_first_denom_gold), big.mark="'")
+format(nrow(unique(diagnoses_all_first_denom_gold[,.(row_ID)])), big.mark="'") 
+
+# blood pressure
+diagnoses_all_first_denom_add_gold = merge(x=diagnoses_all_first_denom_gold, y=blood_pressure_gold, by = "row_ID", all.x = TRUE) # where covariate depend on diagnosis date, merge by row_ID
+head(diagnoses_all_first_denom_add_gold)
+head(comorb_gold_first_index_long)
+
+# weight
+diagnoses_all_first_denom_add_gold = merge(x=diagnoses_all_first_denom_add_gold, y=weight_gold, by = "row_ID", all.x = TRUE)
+
+# smoking
+diagnoses_all_first_denom_add_gold = merge(x=diagnoses_all_first_denom_add_gold, y=smoking_gold, by = "row_ID", all.x = TRUE)
+
+# cholesterol
+diagnoses_all_first_denom_add_gold = merge(x=diagnoses_all_first_denom_add_gold, y=chol_gold, by = "row_ID", all.x = TRUE)
+format(nrow(diagnoses_all_first_denom_add_gold), big.mark="'")
+
+# comorbidities
+diagnoses_all_first_denom_add_comord_gold = merge(x=diagnoses_all_first_denom_add_gold, y=comorb_gold_first_index_long, by = "row_ID", all.x = TRUE)
+format(nrow(diagnoses_all_first_denom_add_comord_gold), big.mark="'") 
+diagnoses_all_first_denom_add_comord_gold[is.na(CKD_any_time_flag), CKD_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_gold[is.na(CAN_any_time_flag), CAN_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_gold[is.na(DIA2_any_time_flag), DIA2_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_gold[is.na(DYS_any_time_flag), DYS_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_gold[is.na(HYP_any_time_flag), HYP_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_gold[is.na(OBE_any_time_flag), OBE_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_gold[is.na(HTH_any_time_flag), HTH_any_time_flag:=0]  # for those without relevant diagnoses, set disease flag to 0
+summary(diagnoses_all_first_denom_add_comord_gold$OBE_any_time_flag)
+format(nrow(diagnoses_all_first_denom_add_comord_gold[is.na(OBE_any_time_flag)]), big.mark="'") # check that no flag is set to NA
+
+# Set flags for comorbidity prevalence up to index date
+diagnoses_all_first_denom_add_comord_gold[,CAN_flag := CAN_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[CAN_any_time_date > diag_date ,CAN_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,CKD_flag := CKD_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[CKD_any_time_date > diag_date ,CKD_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,DIA2_flag := DIA2_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[DIA2_any_time_date > diag_date ,DIA2_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,DYS_flag := DYS_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[DYS_any_time_date > diag_date ,DYS_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,HYP_flag := HYP_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[HYP_any_time_date > diag_date ,HYP_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,OBE_flag := OBE_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[OBE_any_time_date > diag_date ,OBE_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,PSA_flag := PSA_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[PSA_any_time_date > diag_date ,PSA_flag := 0]
+diagnoses_all_first_denom_add_comord_gold[,HTH_flag := HTH_any_time_flag]; diagnoses_all_first_denom_add_comord_gold[HTH_any_time_date > diag_date ,HTH_flag := 0]
+
+diagnoses_all_first_denom_add_comord_gold[,CAN_date := CAN_any_time_date]; diagnoses_all_first_denom_add_comord_gold[CAN_any_time_date > diag_date ,CAN_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,CKD_date := CKD_any_time_date]; diagnoses_all_first_denom_add_comord_gold[CKD_any_time_date > diag_date ,CKD_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,DIA2_date := DIA2_any_time_date]; diagnoses_all_first_denom_add_comord_gold[DIA2_any_time_date > diag_date ,DIA2_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,DYS_date := DYS_any_time_date]; diagnoses_all_first_denom_add_comord_gold[DYS_any_time_date > diag_date ,DYS_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,HYP_date := HYP_any_time_date]; diagnoses_all_first_denom_add_comord_gold[HYP_any_time_date > diag_date ,HYP_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,OBE_date := OBE_any_time_date]; diagnoses_all_first_denom_add_comord_gold[OBE_any_time_date > diag_date ,OBE_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,PSA_date := PSA_any_time_date]; diagnoses_all_first_denom_add_comord_gold[PSA_any_time_date > diag_date ,PSA_date := NA]
+diagnoses_all_first_denom_add_comord_gold[,HTH_date := HTH_any_time_date]; diagnoses_all_first_denom_add_comord_gold[HTH_any_time_date > diag_date ,HTH_date := NA]
+
+# ethnicity
+diagnoses_all_first_denom_add_comord_gold = merge(x=diagnoses_all_first_denom_add_comord_gold, y=gold_ethnicity, by = "patid", all.x = TRUE, allow.cartesian = TRUE)
+format(nrow(diagnoses_all_first_denom_add_comord_gold), big.mark="'") # where covariate is time-independent, merge by patid
+
+
+format(nrow(diagnoses_all_first_denom_gold), big.mark="'") 
+format(nrow(diagnoses_all_first_denom_add_comord_gold), big.mark="'") 
+
+# save table
+fwrite(diagnoses_all_first_denom_add_comord_gold, file.path(PATH_W,"CVD_diagnoses_all_first_denom_add_comord_gold.txt.gz")) 
+rm(list=setdiff(ls(), c("study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_W_all", "PATH_L", "PATH_P", "obs_codes", "comorb_codes_table_1", "ethnicity_codes_gold_aurum", "diagnoses_all_first_denom_aurum", "comorb_gold_first", "comorb_aurum_first")))
+gc()
+```
+
+# AURUM - Observations
+## Read Observation table
+```{r observation, eval=TRUE, warning=FALSE, message=FALSE}
+observation_aurum = fread(file.path(PATH_W,"observation_aurum_additionals.txt.gz")) # this file only contains observations for the selected codes for weight, height, BMI, smoking, blood pressure, comorbidities and ethnicity for all patients
+format(nrow(observation_aurum), big.mark="'") 
+head(observation_aurum)
+observation_aurum[,eventdate:=as.Date(obsdate)]
+class(observation_aurum$eventdate)
+nrow(observation_aurum[is.na(eventdate)]) # check whether there are corrupt eventdates
+
+# Subset to patient in present analysis set
+observation_aurum = observation_aurum[patid %in% diagnoses_all_first_denom_aurum$patid] 
+format(nrow(observation_aurum), big.mark="'") 
+```
+
+## Get diag_date
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+observation_aurum = merge(x=observation_aurum, y=unique(diagnoses_all_first_denom_aurum[,.(patid, disease, diag_date, row_ID)]), by ="patid", all.x = TRUE, allow.cartesian = TRUE)
+format(nrow(observation_aurum), big.mark="'") 
+```
+
+# AURUM - Additionals
+## Get observational's category
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+#observation_aurum_select = observation_aurum_select[medcodeid %in% obs_codes$medcode_aurum]
+additionals_aurum = merge(x=observation_aurum, y=obs_codes[,.(medcode_aurum, status, add_type)], by.x = "medcodeid", by.y = "medcode_aurum")
+nrow(additionals_aurum[is.na(add_type)])
+additionals_aurum = additionals_aurum[!is.na(add_type)]
+head(additionals_aurum)
+format(nrow(additionals_aurum), big.mark="'") 
+```
+
+## Select unique baseline additional as the latest measurement within 2 years prior to diagnosis
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+class(additionals_aurum$eventdate)
+class(additionals_aurum$index_date)
+additionals_aurum_baseline = additionals_aurum[(eventdate <= diag_date +1) & (eventdate > (diag_date - 365*2))] # select only events recorded in the two year prior to index date
+colnames(additionals_aurum)
+additionals_aurum_baseline = additionals_aurum_baseline[,.SD[which.max(eventdate)], by = .(row_ID, add_type)] # select latest record within given time frame
+#additionals_aurum_baseline = merge(x=additionals_aurum_baseline, y=patient_aurum[,.(patid, yob)], by = "patid", all.x = TRUE)
+head(additionals_aurum_baseline)
+nrow(additionals_aurum)
+nrow(additionals_aurum_baseline)
+```
+
+## BP - 2 years prior
+```{r bp , eval=TRUE, warning=FALSE, message=FALSE}
+levels(additionals_aurum_baseline$add_type)
+sys_blood_pressure_aurum = subset(additionals_aurum_baseline, add_type == "SBP", select=c(patid, row_ID, diag_date, obsid, medcodeid, eventdate, value))
+table(sys_blood_pressure_aurum$medcodeid)
+
+summary(sys_blood_pressure_aurum$value)
+nrow(sys_blood_pressure_aurum[is.na(eventdate)])
+setnames(sys_blood_pressure_aurum, old=c("value", "eventdate"), new =c("SBP", "BP_eventdate"))
+nrow(sys_blood_pressure_aurum)
+
+dia_blood_pressure_aurum = subset(additionals_aurum_baseline, add_type == "DBP", select=c(patid, row_ID, diag_date, obsid, eventdate, value))
+summary(dia_blood_pressure_aurum$value)
+nrow(dia_blood_pressure_aurum[is.na(eventdate)])
+setnames(dia_blood_pressure_aurum, old=c("value", "eventdate"), new =c("DBP", "DBP_eventdate"))
+nrow(dia_blood_pressure_aurum)
+
+blood_pressure_aurum = merge(sys_blood_pressure_aurum, dia_blood_pressure_aurum, by = "row_ID", all = TRUE)
+nrow(blood_pressure_aurum)
+
+# Exclude non-sensical results (60 < SBP > 250 or 30 < DBP< 180)
+blood_pressure_aurum[DBP < 30 | DBP > 180, DBP := NA]
+blood_pressure_aurum[SBP < 60 | SBP > 250, SBP := NA]
+
+blood_pressure_aurum = blood_pressure_aurum[, .(row_ID, DBP, SBP, BP_eventdate, DBP_eventdate)]
+nrow(blood_pressure_aurum)
+
+# save table
+fwrite(blood_pressure_aurum, file.path(PATH_W,"CVD_blood_pressure_aurum.txt.gz")) 
+```
+
+## BMI - 2 years prior
+```{r BMI_aurum, eval=TRUE, warning=FALSE, message=FALSE}
+bmi_aurum = subset(additionals_aurum_baseline, add_type == "BMI", select=c(patid, row_ID, diag_date, obsid, obsdate, value, numunitid,  medcodeid))
+
+summary(bmi_aurum$value)
+table(bmi_aurum$numunitid)
+table(bmi_aurum$medcodeid)
+
+# Exclude non-sensical results
+bmi_aurum[value < 10, value := NA]
+bmi_aurum[value > 70, value := NA]
+summary(bmi_aurum$value)
+
+# Select and rename columns
+bmi_aurum = bmi_aurum[,.(row_ID, value, obsdate)]
+setnames(bmi_aurum, old=c("value", "obsdate"), new =c("BMI", "BMI_eventdate"))
+
+# save table
+fwrite(bmi_aurum, file.path(PATH_W,"CVD_bmi_aurum.txt.gz")) 
+
+```
+
+
+## Smoking - 2 years prior to index
+```{r smoking_aurum, eval=TRUE, warning=FALSE, message=FALSE}
+#nrow(subset(additionals_baseline, enttype == 4))
+smoking_aurum = subset(additionals_aurum_baseline, add_type == "Smoking", select=c(patid, row_ID, diag_date, obsid, obsdate, value, numunitid,  medcodeid, add_type, status))
+summary(smoking_aurum$value)
+table(smoking_aurum$numunitid)
+table(smoking_aurum$medcodeid)
+
+# Set smoking status
+levels(as.factor(smoking_aurum$numunitid))
+levels(as.factor(smoking_aurum$status))
+smoking_aurum[numunitid %in% c("/day (Ex)", "/day (past)", "/day Ex smoker", "/day Ex-heavy", "/day Ex-light", "/day Ex-moderate", "/day ExSmok", "/day(Ex-smok)" , "/dy exsmoker", "/ex per day", "Cig/d(past)" , "cigars/day (past)", "cigs/day (past)", "ex cig/d", "Ex/day", "ExPipe oz(28g)/wk", "oz/wk (past)", "PAST CIG/D", "past cig/day", "past daily useage" ) | status == "Ex", smok_status_name := "Ex"]
+smoking_aurum[numunitid %in% c("(Year)" , "/ day", "/ year", "/d" , "/day", "/day current", "/month", "/per day", "/week", "/weeks", "/wk", "/year", "\\day", "a day", "a week", "a/day", "age", "cig", "cig day", "cig.d", "cig/day", "Cig/Dy",  "CIGAR/DAY", "cigarettes", "cigarettes a day" , "CIGARETTES PER DAY", "Cigarettes/day", "cigars/day", "CIGS", "cigs/d", "Cigs/Day", "daily", "day",  "days",  "g/week", "GIGS/DAY" ,  "gm/wk" ,  "gms/week", "grams/day", "grams/week" , "grams/wk" , "grms/wk", "month",  "no./day",  "No/Day", "number/week", "Occasional", "occasionally", "ounce",  "Ounces of tobacco/day", "ounces/week", "oz tobacco/week", "oz/week", "oz/wk",  "oz/wk (past)", "oz/wk.", "packet p/w", "per day", "per week",  "per/day",  "pipe oz(28g)/wk", "week", "weeks",  "year", "years") | status == "Yes", smok_status_name := "Yes"]
+smoking_aurum[numunitid=="NO" | value==0 | status == "No", smok_status_name := "No"]
+table(smoking_aurum$smok_status_name)
+
+setnames(smoking_aurum, old=c( "obsdate"), new =c("smok_eventdate"))
+nrow(smoking_aurum[is.na(smok_eventdate)])
+head(smoking_aurum)
+
+smoking_aurum =  smoking_aurum[,.(row_ID, smok_status_name, smok_eventdate)]
+setnames(smoking_aurum, old=c("smok_status_name", "smok_eventdate"), new =c("smok_status_name", "smok_eventdate"))
+
+# save table
+fwrite(smoking_aurum, file.path(PATH_W,"CVD_smoking_aurum.txt.gz")) 
+```
+
+
+## Cholesterol - 2 years prior to index
+```{r test1, eval=TRUE, warning=FALSE, message=FALSE}
+# levels(additionals_aurum_baseline$add_type)
+chol_aurum = subset(additionals_aurum_baseline, add_type == "Cholesterol", select=c(patid, row_ID, diag_date, obsid, medcodeid, eventdate, value))
+table(chol_aurum$medcodeid)
+
+summary(chol_aurum$value)
+nrow(chol_aurum[is.na(eventdate)])
+setnames(chol_aurum, old=c("value", "eventdate"), new =c("chol_ratio", "chol_ratio_eventdate"))
+nrow(chol_aurum)
+
+# Exclude non-sensical results (0 < chol_ratio < 10)
+chol_aurum[chol_ratio < 0 | chol_ratio > 10, chol_ratio := NA]
+head(chol_aurum)
+
+# Select and rename columns
+chol_aurum = chol_aurum[, .(row_ID, chol_ratio, chol_ratio_eventdate)]
+nrow(chol_aurum)
+
+# save table
+fwrite(chol_aurum, file.path(PATH_W,"CVD_chol_aurum.txt.gz")) 
+```
+
+
+# AURUM - Comorbidities
+## Extract comorbidities' diagnoses - AURUM primary care
+```{r comorb_aurum, eval=TRUE, warning=FALSE, message=FALSE}
+head(comorb_codes_table_1[codetype == "aurum"])
+#comorb_aurum_pc= subset(fread(file.path(PATH_D,"/AURUM/Data/Primary_Care/Observation/Observation1/19_156_Aurum_Extract_Obs_1_extOBS.txt.gz"), select = c("patid", "obsdate", "medcodeid")), medcodeid %in% comorb_read_codes$medcode)
+#comorb_aurum_pc = subset(fread(file.path(PATH_W,"observation_aurum_selected.txt.gz")), select = c("patid", "obsdate", "medcodeid"), medcodeid %in% comorb_codes_table_1[codetype == "aurum"]$medcode_aurum)
+comorb_aurum_pc = observation_aurum[medcodeid %in% comorb_codes_table_1[codetype == "aurum"]$medcode_aurum]
+nrow(comorb_aurum_pc)
+
+comorb_aurum_pc[,obsdate:=as.Date(obsdate, format="%d/%m/%Y")] #set date format
+head(comorb_aurum_pc)
+format(nrow(comorb_aurum_pc), big.mark="'") 
+
+comorb_aurum_pc[,database := "CPRD AURUM"] 
+comorb_aurum_pc[,codetype := "READ"] 
+setnames(comorb_aurum_pc, old=c("obsdate", "medcodeid"), new =c("comorb_diag_date", "comorb_diag_code")) # date of diagnosis = date of discharge 
+nrow(comorb_aurum_pc[is.na(comorb_diag_date),]) # double check number of corrupt eventdates
+comorb_aurum_pc = comorb_aurum_pc[!is.na(comorb_diag_date)] # exclude events with missing date
+comorb_aurum_pc = comorb_aurum_pc[duplicated(comorb_aurum_pc)==F,] # Exclude duplicates
+format(nrow(comorb_aurum_pc), big.mark="'") 
+class(comorb_aurum_pc$comorb_diag_date)
+comorb_aurum_pc[,comorb_diag_date := as.Date(comorb_diag_date)] 
+head(comorb_aurum_pc)
+
+comorb_aurum_pc[,comorb_diag_code_unique_ID := paste("A",comorb_diag_code, sep="_")] ## Define unique_ID
+colnames(comorb_aurum_pc)
+```
+
+## Extract comorbidities' diagnoses - HES
+```{r comorb_aurum_hes, eval=TRUE, warning=FALSE, message=FALSE}
+#comorb_aurum_hes = fread(file.path(PATH_D, "AURUM/Data/Linked_Data/HES_Diagnoses_by_hosp/hes_diagnosis_hosp_19_156A_DM.txt.gz"))
+setwd(file.path(PATH_D, "AURUM/Data/Linked_Data/HES_Diagnoses_by_hosp"))
+comorb_aurum_hes = rbindlist( lapply(list.files(), function(x) {fread(x)} ))
+
+nrow(comorb_aurum_hes[ICDx != ""])
+comorb_aurum_hes[ICDx %in% c("-","--","~","-~", "A", "D", "d", "Z", "-A","-D", "X", "E", "+", "*", ",", "!", "G", ".", "H", "F", "J", "K", "R", "N", "DN", "C", "I", "DH", "DR", "H3", "+L", "DG", "a", "M", "#", "~Y", "S", "0D", "2D", "2~", "9~","9D", " ")]$ICDx = ""  # Exclude unhelpful modifiers
+nrow(comorb_aurum_hes[ICDx != ""])
+comorb_aurum_hes[,ICD_5:= paste(ICD, ICDx, sep = "")] # concatenate ICD codes and modifiers as one single code
+comorb_aurum_hes1 = subset(comorb_aurum_hes, ICD %in% comorb_codes_table_1[codetype == "icd"]$icd_code)
+comorb_aurum_hes2 = subset(comorb_aurum_hes, ICD_5 %in% comorb_codes_table_1[codetype == "icd"]$icd_code)
+nrow(comorb_aurum_hes1)
+nrow(comorb_aurum_hes2)
+nrow(comorb_aurum_hes1)-nrow(comorb_aurum_hes2)
+fsetdiff(comorb_aurum_hes1, comorb_aurum_hes2, all = TRUE)
+fsetdiff(comorb_aurum_hes2, comorb_aurum_hes1, all = TRUE)
+comorb_aurum_hes = comorb_aurum_hes1
+nrow(comorb_codes_table_1[codetype == "icd"])
+
+comorb_aurum_hes[,admidate:=as.Date(admidate, format="%d/%m/%Y")] #set date format
+comorb_aurum_hes[,discharged:=as.Date(discharged, format="%d/%m/%Y")] #set date format
+head(comorb_aurum_hes)
+format(nrow(comorb_aurum_hes), big.mark="'") 
+
+comorb_aurum_hes[,database := "HES APC AURUM"] 
+comorb_aurum_hes[,codetype := "ICD"] 
+setnames(comorb_aurum_hes, old=c("discharged", "ICD", "ICDx"), new =c("comorb_diag_date", "comorb_diag_code", "icd_modifier")) # date of diagnosis = date of discharge 
+nrow(comorb_aurum_hes[is.na(comorb_diag_date),]) # double check number of corrupt eventdates
+comorb_aurum_hes[is.na(comorb_diag_date), comorb_diag_date:= admidate ] # where discharge date is missing, use admission date
+nrow(comorb_aurum_hes[is.na(comorb_diag_date),]) # double check number of corrupt eventdates
+comorb_aurum_hes = comorb_aurum_hes[!is.na(comorb_diag_date)] # exclude events where both admission and discharge dates are missing
+nrow(comorb_aurum_hes[is.na(comorb_diag_date)])
+
+comorb_aurum_hes = comorb_aurum_hes[duplicated(comorb_aurum_hes)==F,] # Exclude duplicates
+format(nrow(comorb_aurum_hes), big.mark="'") 
+
+comorb_aurum_hes[,comorb_diag_code_unique_ID := paste("I",comorb_diag_code, sep="_")] ## Define unique_ID
+colnames(comorb_aurum_hes)
+```
+
+## Combine AURUM and HES comorbidities
+```{r Combine_comorb_aurum, eval=TRUE, warning=FALSE, message=FALSE}
+# Combine tables
+comorb_aurum_pc[,comorb_diag_code := as.character(comorb_diag_code)]
+#class(comorb_aurum_pc$diag_date)
+#class(comorb_aurum_hes$diag_date)
+comorb_aurum = rbind(comorb_aurum_pc[,.(patid, comorb_diag_date, comorb_diag_code, database, codetype, comorb_diag_code_unique_ID)], comorb_aurum_hes[,.(patid, comorb_diag_date, comorb_diag_code, database, codetype, comorb_diag_code_unique_ID)])
+
+# Add disease description
+format(nrow(comorb_aurum), big.mark="'") 
+nrow(comorb_codes_table_1) # number of rows
+#nrow(unique(comorb_codes[,.(codetype, medcode, description)])) # some codes refer to two or more conditions
+
+comorb_aurum = merge(comorb_aurum, unique(comorb_codes_table_1[,.(disease, description, unique_ID)]), by.x =c( "comorb_diag_code_unique_ID") , by.y =c("unique_ID"), all.x = TRUE, allow.cartesian = TRUE)
+nrow(comorb_aurum[is.na(disease)])
+format(nrow(comorb_aurum), big.mark="'") 
+colnames(comorb_aurum)
+```
+
+## Select first diagnosis date
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+class(comorb_aurum$comorb_diag_date)
+nrow(comorb_aurum[is.na(comorb_diag_date)])
+comorb_aurum_first = comorb_aurum[,.SD[which.min(comorb_diag_date)], by = .(patid, disease)]
+format(nrow(comorb_aurum_first), big.mark="'") 
+```
+
+## Create comorbidities flag
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+# Get index date
+format(nrow(comorb_aurum_first), big.mark="'") 
+colnames(comorb_aurum_first)
+comorb_aurum_first = merge(comorb_aurum_first, diagnoses_all_first_denom_aurum[,.(patid, row_ID, diag_date)], by = "patid", all.x =TRUE, allow.cartesian=TRUE)
+format(nrow(comorb_aurum_first), big.mark="'") 
+nrow(comorb_aurum_first[is.na(diag_date)])
+colnames(comorb_aurum_first)
+
+# Add short disease description
+levels(as.factor(comorb_aurum_first$disease))
+levels(as.factor(comorb_codes_table_1$disease))
+disease_short = data.table(disease = c("Cancer","CKD", "Type 2 diabetes", "Dyslipidaemia" , "Hypertension", "Obesity", "Psoriatic arthritis", "Hyperthyroidism"), disease_short = c("CAN", "CKD", "DIA2", "DYS", "HYP", "OBE", "PSA", "HTH"))
+comorb_aurum_first = merge(comorb_aurum_first, disease_short, by = "disease")
+format(nrow(comorb_aurum_first), big.mark="'") 
+
+# Check dates
+class(comorb_aurum_first$diag_date)
+class(comorb_aurum_first$comorb_diag_date)
+nrow(comorb_aurum_first[is.na(diag_date)])
+nrow(comorb_aurum_first[is.na(comorb_diag_date)])
+
+# Transform diagnoses into long format with flag and date for each condition
+comorb_aurum_first_index_long1 = dcast(comorb_aurum_first, row_ID ~ paste(disease_short, "_any_time_flag", sep=""), value.var = c("disease"), fun.aggregate = list(length))
+comorb_aurum_first_index_long2 = dcast(comorb_aurum_first, row_ID ~ paste(disease_short, "_any_time_date", sep=""), value.var = c("comorb_diag_date"), fun.aggregate = pmin, fill=NA)
+head(comorb_aurum_first_index_long2)
+comorb_aurum_first_index_long = merge(comorb_aurum_first_index_long1, comorb_aurum_first_index_long2, by = c("row_ID"), all = TRUE )
+head(comorb_aurum_first_index_long)
+#comorb_aurum_first_index_long[row_ID == "G4012710677_NA"]
+
+# save table
+fwrite(comorb_aurum_first_index_long, file.path(PATH_W,"CVD_aurum_comorbidities.txt.gz")) 
+```
+
+# AURUM - Ethnicity
+```{r ethnicity_aurum, eval=TRUE, warning=FALSE, message=FALSE}
+# Extract ethnicity from Aurum
+#aurum_ethnicity_primary_care= subset(fread(file.path(PATH_W,"/observation_aurum_diagnoses.txt.gz"), colClasses=c("patid"="integer64", "medcodeid"="integer64", "obsdate"="Date")), medcodeid %in% ethnicity_codes_gold_aurum$medcode_aurum)
+aurum_ethnicity_primary_care = observation_aurum[medcodeid %in% ethnicity_codes_gold_aurum$medcode_aurum]
+format(nrow(aurum_ethnicity_primary_care), big.mark="'")  # Check total number of events
+head(aurum_ethnicity_primary_care)
+
+setnames(aurum_ethnicity_primary_care, old=c( "obsdate", "medcodeid"), new =c("eventdate", "medcode_aurum")) # rename columns
+class(aurum_ethnicity_primary_care$medcode_aurum) # check class is integer64 (CPRD Aurum only)
+#aurum_diagnoses_primary_care[,eventdate:=as.Date(eventdate, format="%d/%m/%Y")] # Set date format
+format(nrow(aurum_ethnicity_primary_care[is.na(eventdate),]), big.mark="'") # Check number of corrupt eventdates
+aurum_ethnicity_primary_care=aurum_ethnicity_primary_care[!is.na(eventdate),] # Exclude events with corrupt date
+#nrow(aurum_diagnoses_primary_care[rapportools::is.empty(eventdate),]) # Check number of empty eventdates
+format(nrow(aurum_ethnicity_primary_care), big.mark="'") 
+nrow(aurum_ethnicity_primary_care)
+aurum_ethnicity_primary_care=aurum_ethnicity_primary_care[,.SD[which.max(eventdate)], by = c("patid")] # select latest ethnicity recording
+nrow(aurum_ethnicity_primary_care)
+#Merge with code dictionary
+aurum_ethnicity_primary_care_dict = merge(aurum_ethnicity_primary_care[,.(patid, medcode_aurum, eventdate)], ethnicity_codes_gold_aurum[,.(medcode_aurum,readcode, ethnicity_description, ethnicity_category1, ethnicity_category2)], by.x = "medcode_aurum", by.y = "medcode_aurum", all.x=T, allow.cartesian=TRUE)
+nrow(aurum_ethnicity_primary_care_dict)
+head(aurum_ethnicity_primary_care_dict)
+ethnicity_codes_gold_aurum
+setnames(aurum_ethnicity_primary_care_dict, old = c("readcode", "eventdate"), new = c("ethnicity_medcode", "ethnicity_eventdate"))
+nrow(aurum_ethnicity_primary_care_dict[is.na(ethnicity_category1)])
+levels(as.factor(aurum_ethnicity_primary_care_dict$ethnicity_category2)) # Codes checked (these are codes that have been excluded from final analyses) 
+colnames(aurum_ethnicity_primary_care_dict)
+aurum_ethnicity_primary_care_dict[,ethnicity_source:= "CPRD Aurum"]
+colnames(aurum_ethnicity_primary_care_dict)
+
+## Ethnicity HES Aurum
+aurum_ethnicity_hes = fread(file.path(PATH_D,"/Aurum/Data/Linked_Data/hes_patient_19_156A_DM.txt.gz"), header = T, sep="\t")
+aurum_ethnicity_hes
+format(nrow(aurum_ethnicity_hes), big.mark="'")  # Check total number of records
+levels(as.factor(aurum_ethnicity_hes$gen_ethnicity))
+setnames(aurum_ethnicity_hes, old = c("gen_ethnicity"), new = c("ethnicity_description"))
+aurum_ethnicity_hes[ethnicity_description %in% c("Bangladesi", "Bl_Afric", "Bl_Carib", "Bl_Other", "Chinese",  "Indian",  "Mixed", "Oth_Asian", "Other", "Pakistani"), ethnicity_category2 := "Other"]
+aurum_ethnicity_hes[ethnicity_description %in% c("White" ), ethnicity_category2 := "White"]
+aurum_ethnicity_hes[ethnicity_description %in% c("White" ), ethnicity_category1 := "White"]
+aurum_ethnicity_hes[ethnicity_description %in% c("Bangladesi", "Chinese",  "Indian",  "Oth_Asian",  "Pakistani"), ethnicity_category1 := "Asian"]
+aurum_ethnicity_hes[ethnicity_description %in% c("Bl_Afric", "Bl_Carib", "Bl_Other"), ethnicity_category1 := "African/Caribean"]
+aurum_ethnicity_hes[ethnicity_description %in% c("Mixed"), ethnicity_category1 := "Mixed"]
+aurum_ethnicity_hes[ethnicity_description %in% c("Other"), ethnicity_category1 := "Other"]
+aurum_ethnicity_hes = aurum_ethnicity_hes[!is.na(ethnicity_category2)]
+format(nrow(aurum_ethnicity_hes), big.mark="'")  # Check total number of records
+aurum_ethnicity_hes[,ethnicity_source:= "Aurum HES"]
+
+## Merge Ethnicity in CPRD and HES GOLD, select HES record in case of duplicate
+aurum_ethnicity = rbind(aurum_ethnicity_hes[,.(patid, ethnicity_description, ethnicity_category1, ethnicity_category2, ethnicity_source)], 
+aurum_ethnicity_primary_care_dict[!(patid %in% aurum_ethnicity_hes$patid),.(patid, ethnicity_description, ethnicity_category1, ethnicity_category2, ethnicity_source)], fill = TRUE)
+nrow(aurum_ethnicity)-length(unique(aurum_ethnicity$patid)) # check that there are no duplicate patids
+colnames(aurum_ethnicity)
+
+# save table
+fwrite(aurum_ethnicity, file.path(PATH_W,"CVD_aurum_ethnicity.txt.gz")) 
+rm(list=setdiff(ls(), c("study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_W_all", "PATH_L", "PATH_P", "diagnoses_all_first_denom", "diagnoses_all_first_denom_aurum", "obs_codes", "comorb_codes_table_1", "ethnicity_codes_gold_aurum", "comorb_gold_first", "comorb_aurum_first", "comorb_aurum_first_index_long", "aurum_ethnicity", "blood_pressure_aurum", "bmi_aurum", "smoking_aurum", "chol_aurum")))
+gc()
+```
+
+# AURUM - Merge baseline additionals with patient table
+```{r baseline_aurum, eval=TRUE, warning=FALSE, message=FALSE}
+format(nrow(diagnoses_all_first_denom_aurum), big.mark="'")
+format(nrow(unique(diagnoses_all_first_denom_aurum[,.(row_ID)])), big.mark="'") 
+
+# blood pressure
+diagnoses_all_first_denom_add_aurum = merge(x=diagnoses_all_first_denom_aurum, y=blood_pressure_aurum, by = "row_ID", all.x = TRUE) # where covariate depend on diagnosis date, merge by row_ID
+
+# weight
+diagnoses_all_first_denom_add_aurum = merge(x=diagnoses_all_first_denom_add_aurum, y=bmi_aurum, by = "row_ID", all.x = TRUE)
+
+# smoking
+diagnoses_all_first_denom_add_aurum = merge(x=diagnoses_all_first_denom_add_aurum, y=smoking_aurum, by = "row_ID", all.x = TRUE)
+
+# cholesterol
+diagnoses_all_first_denom_add_aurum = merge(x=diagnoses_all_first_denom_add_aurum, y=chol_aurum, by = "row_ID", all.x = TRUE)
+format(nrow(diagnoses_all_first_denom_add_aurum), big.mark="'")
+
+# comorbidities
+diagnoses_all_first_denom_add_comord_aurum = merge(x=diagnoses_all_first_denom_add_aurum, y=comorb_aurum_first_index_long, by = "row_ID", all.x = TRUE)
+format(nrow(diagnoses_all_first_denom_add_comord_aurum), big.mark="'") 
+diagnoses_all_first_denom_add_comord_aurum[is.na(CKD_any_time_flag), CKD_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_aurum[is.na(CAN_any_time_flag), CAN_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_aurum[is.na(DIA2_any_time_flag), DIA2_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_aurum[is.na(DYS_any_time_flag), DYS_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_aurum[is.na(HYP_any_time_flag), HYP_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_aurum[is.na(OBE_any_time_flag), OBE_any_time_flag:=0]; diagnoses_all_first_denom_add_comord_aurum[is.na(HTH_any_time_flag), HTH_any_time_flag:=0]  # for those without relevant diagnoses, set disease flag to 0
+summary(diagnoses_all_first_denom_add_comord_aurum$OBE_any_time_flag)
+format(nrow(diagnoses_all_first_denom_add_comord_aurum[is.na(OBE_any_time_flag)]), big.mark="'") # check that no flag is set to NA
+
+# Set flags for comorbidity prevalence up to index date
+diagnoses_all_first_denom_add_comord_aurum[,CAN_flag := CAN_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[CAN_any_time_date > diag_date ,CAN_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,CKD_flag := CKD_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[CKD_any_time_date > diag_date ,CKD_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,DIA2_flag := DIA2_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[DIA2_any_time_date > diag_date ,DIA2_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,DYS_flag := DYS_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[DYS_any_time_date > diag_date ,DYS_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,HYP_flag := HYP_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[HYP_any_time_date > diag_date ,HYP_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,OBE_flag := OBE_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[OBE_any_time_date > diag_date ,OBE_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,PSA_flag := PSA_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[PSA_any_time_date > diag_date ,PSA_flag := 0]
+diagnoses_all_first_denom_add_comord_aurum[,HTH_flag := HTH_any_time_flag]; diagnoses_all_first_denom_add_comord_aurum[HTH_any_time_date > diag_date ,HTH_flag := 0]
+
+diagnoses_all_first_denom_add_comord_aurum[,CAN_date := CAN_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[CAN_any_time_date > diag_date ,CAN_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,CKD_date := CKD_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[CKD_any_time_date > diag_date ,CKD_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,DIA2_date := DIA2_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[DIA2_any_time_date > diag_date ,DIA2_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,DYS_date := DYS_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[DYS_any_time_date > diag_date ,DYS_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,HYP_date := HYP_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[HYP_any_time_date > diag_date ,HYP_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,OBE_date := OBE_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[OBE_any_time_date > diag_date ,OBE_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,PSA_date := PSA_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[PSA_any_time_date > diag_date ,PSA_date := NA]
+diagnoses_all_first_denom_add_comord_aurum[,HTH_date := HTH_any_time_date]; diagnoses_all_first_denom_add_comord_aurum[HTH_any_time_date > diag_date ,HTH_date := NA]
+
+# ethnicity
+diagnoses_all_first_denom_add_comord_aurum = merge(x=diagnoses_all_first_denom_add_comord_aurum, y=aurum_ethnicity, by = "patid", all.x = TRUE, allow.cartesian = TRUE)
+format(nrow(diagnoses_all_first_denom_add_comord_aurum), big.mark="'") # where covariate is time-independent, merge by patid
+
+format(nrow(diagnoses_all_first_denom_aurum), big.mark="'") 
+format(nrow(diagnoses_all_first_denom_add_comord_aurum), big.mark="'") 
+
+# save table
+fwrite(diagnoses_all_first_denom_add_comord_aurum, file.path(PATH_W,"CVD_diagnoses_all_first_denom_add_comord_aurum.txt.gz")) 
+rm(list=setdiff(ls(), c("study_start_date", "study_end_date", "linkage_start_date", "PATH", "PATH_D", "PATH_W", "PATH_W_all", "PATH_L", "PATH_P", "diagnoses_all_first_denom", "diagnoses_all_first_denom_aurum", "obs_codes", "comorb_codes_table_1", "ethnicity_codes_gold_aurum", "diagnoses_all_first_denom_add_comord_aurum", "diagnoses_all_first_denom_add_comord_gold", "comorb_gold_first", "comorb_aurum_first")))
+gc()
+
+```
+
+# Merge GOLD and AURUM
+```{r save, eval=TRUE, warning=FALSE, message=FALSE}
+#
+diagnoses_all_first_denom_add_comord_gold = fread(file.path(PATH_W,"CVD_diagnoses_all_first_denom_add_comord_gold.txt.gz"), colClasses = c("eventdate"="Date", "first_AD_date"="Date", "first_HER_date"="Date", "first_CVD_date"="Date", "first_INF_date"="Date", "first_CVD_hes_primary_date"="Date", "start_date"="Date", "end_date" ="Date", "lcdate" ="Date", "regdate" ="Date","todate"="Date", "diag_date"="Date", "BP_eventdate"="Date", "CAN_date"="Date", "CKD_date"="Date", "DIA2_date" ="Date", "DYS_date"="Date", "HYP_date"="Date", "OBE_date"="Date", "HTH_date"="Date"))
+#
+diagnoses_all_first_denom_add_comord_aurum = fread(file.path(PATH_W,"CVD_diagnoses_all_first_denom_add_comord_aurum.txt.gz"), colClasses = c("eventdate"="Date", "first_AD_date"="Date", "first_HER_date"="Date", "first_CVD_date"="Date", "first_INF_date"="Date", "first_CVD_hes_primary_date"="Date", "start_date"="Date", "end_date" ="Date", "lcdate" ="Date", "regdate" ="Date","todate"="Date", "diag_date"="Date", "BP_eventdate"="Date", "CAN_date"="Date", "CKD_date"="Date", "DIA2_date" ="Date", "DYS_date"="Date", "HYP_date"="Date", "OBE_date"="Date", "HTH_date"="Date"))
+#diagnoses_all_first_denom_add_comord_aurum= fread(file.path(PATH_W,"CVD_diagnoses_all_first_denom_add_comord_aurum.txt.gz"))
+colnames(diagnoses_all_first_denom_add_comord_gold)
+summary(diagnoses_all_first_denom_add_comord_gold$HTH_flag)
+head(diagnoses_all_first_denom_add_comord_aurum)
+summary(diagnoses_all_first_denom_add_comord_aurum$deathdate)
+summary(diagnoses_all_first_denom_add_comord_gold$deathdate)
+#diagnoses_all_first_denom_add_comord_aurum[,deathdate:=NULL]
+colnames(diagnoses_all_first_denom_add_comord_aurum)
+colnames(diagnoses_all_first_denom_add_comord_gold)
+class(diagnoses_all_first_denom_add_comord_gold$CVD_as_first_death_cause_date)
+class(diagnoses_all_first_denom_add_comord_aurum$CVD_as_first_death_cause_date)
+diagnoses_all_first_denom_add_comord = rbind(diagnoses_all_first_denom_add_comord_gold, diagnoses_all_first_denom_add_comord_aurum, fill =TRUE)
+
+diagnoses_all_first_denom_add_comord[ethnicity_description=="", ethnicity_description:= NA]
+diagnoses_all_first_denom_add_comord[ethnicity_source=="", ethnicity_source:= NA]
+diagnoses_all_first_denom_add_comord[ethnicity_category1=="", ethnicity_category1:= NA]
+diagnoses_all_first_denom_add_comord[ethnicity_category2=="", ethnicity_category2:= NA]
+diagnoses_all_first_denom_add_comord[smok_status_name=="", smok_status_name:= NA]
+
+fwrite(diagnoses_all_first_denom_add_comord, file.path(PATH_W,"CVD_diagnoses_all_first_denom_add_comord.txt.gz")) 
+```
